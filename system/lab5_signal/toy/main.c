@@ -11,6 +11,16 @@ static void
 sigchldHandler(int sig)
 {
     /* 구현 */
+    int status;
+    pid_t childPid;
+
+    printf("handler: Caught SigCHLD : %d\n", sig);
+    
+    while ((childPid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("handler: Reaped child %ld - ", (long) childPid);
+    }
+    
+    printf("handler : returning\n");
 }
 
 int main()
@@ -22,6 +32,12 @@ int main()
     struct sigaction sa;
 
     /* 여기서 SIGCHLD 시그널  등록 */
+    sa.sa_flags = 0;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = sigchldHandler;
+    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+        perror("SIGCHLD sigaction error");
+    }
 
     printf("메인 함수입니다.\n");
     printf("시스템 서버를 생성합니다.\n");

@@ -62,6 +62,8 @@ int input()
     printf("나 input 프로세스!\n");
 
     /* 여기서 SIGSEGV 시그널 등록 */
+    if (signal(SIGSEGV, segfault_handler) == -1)
+        perror("signal");
 
     while (1) {
         sleep(1);
