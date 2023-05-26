@@ -14,7 +14,7 @@
 static int toy_timer = 0;
 
 void sigalarm_handler(int sig) {
-    printf("time hanlder : %d\n", toy_timer++);
+    toy_timer++;
 }
 
 void set_periodic_timer(long sec_delay, long usec_delay)
@@ -37,18 +37,41 @@ int posix_sleep_ms(unsigned int timeout_ms)
     return nanosleep(&sleep_time, NULL);
 }
 
+void *watchdog_thread(void* arg) {
+    while (1) {
+        sleep(1);
+    }
+}
+
+void *monitor_thread(void* arg) {
+    while (1) {
+        sleep(1);
+    }
+}
+
+void *disk_service_thread(void* arg) {
+    while (1) {
+        sleep(1);
+    }
+}
+
+void *camera_service_thread(void* arg) {
+    while (1) {
+        sleep(1);
+    }
+}
+
 int system_server()
 {
     struct itimerval ts;
     struct sigaction  sa;
     struct sigevent   sev;
     timer_t *tidlist;
-    int retcode;
+    int retcode[4];
     pthread_t watchdog_thread_tid, monitor_thread_tid, disk_service_thread_tid, camera_service_thread_tid;
 
     printf("나 system_server 프로세스!\n");
 
-    /* 5초 타이머를 만들어 봅시다. */
     /* 5초 타이머를 만들어 봅시다. */
     
     sa.sa_flags = 0;
@@ -64,10 +87,21 @@ int system_server()
     ts.it_value.tv_usec = 0;
 
     if (setitimer(ITIMER_REAL, &ts, NULL)) {
-        perror("setTimer error");
+        perror("setTimer error\n");
     }
 
     /* watchdog, monitor, disk_service, camera_service 스레드를 생성한다. */
+    retcode[0] = pthread_create(&watchdog_thread_tid, NULL, watchdog_thread, "watchdog thread");
+    retcode[1] = pthread_create(&monitor_thread_tid, NULL, monitor_thread, "monitor thread");
+    retcode[2] = pthread_create(&disk_service_thread_tid, NULL, disk_service_thread, "disk_service thread");
+    retcode[3] = pthread_create(&camera_service_thread_tid, NULL, camera_service_thread, "camera_service thread");
+
+    int length = sizeof(retcode) / sizeof(retcode[0]);
+
+    for (int i=0;i<length;i++) {
+        if (retcode[i] != 0)
+            perror(retcode[i] + " : pthread_create error\n");
+    }
 
     printf("system init done.  waiting...");
     while (1) {

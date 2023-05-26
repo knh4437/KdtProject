@@ -73,7 +73,7 @@ void *sensor_thread(void* arg)
 {
     char *s = arg;
 
-    printf("%s", s);
+    printf("%s\n", s);
 
     while (1) {
         posix_sleep_ms(5000);
@@ -230,7 +230,7 @@ void *command_thread(void* arg)
 {
     char *s = arg;
 
-    printf("%s", s);
+    printf("%s\n", s);
 
     toy_loop();
 
@@ -239,7 +239,7 @@ void *command_thread(void* arg)
 
 int input()
 {
-    int retcode;
+    int retcode[2];
     struct sigaction sa;
     pthread_t command_thread_tid, sensor_thread_tid;
 
@@ -254,6 +254,16 @@ int input()
     sigaction(SIGSEGV, &sa, NULL); /* ignore whether it works or not */
 
    /* 여기서 스레드를 생성한다. */
+
+    retcode[0] = pthread_create(&command_thread_tid, NULL, command_thread, "command thread"); /* command_thread 생성 */
+    retcode[1] = pthread_create(&sensor_thread_tid, NULL, sensor_thread, "sensor thread"); /* sensor thread */
+
+    int length = sizeof(retcode) / sizeof(retcode[0]);
+    
+    for (int i=0;i<length;i++) {
+        if (retcode[i] != 0)
+            perror(retcode[i] + " : pthread_create error\n");
+    }
 
     while (1) {
         sleep(1);
