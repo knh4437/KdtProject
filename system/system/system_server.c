@@ -58,9 +58,36 @@ void *monitor_thread(void* arg) {
 }
 
 void *disk_service_thread(void* arg) {
+    char *s = arg;
+    FILE* apipe;
+    char buf[1024];
+    char cmd[]="df -h ./" ;
+
+    printf("%s", s);
+
     while (1) {
-        sleep(1);
+        /* popen 사용하여 10초마다 disk 잔여량 출력
+         * popen으로 shell을 실행하면 성능과 보안 문제가 있음
+         * 향후 파일 관련 시스템 콜 시간에 개선,
+         * 하지만 가끔 빠르게 테스트 프로그램 또는 프로토 타입 시스템 작성 시 유용
+         */
+
+        apipe = popen(cmd, "r");
+        if (apipe == NULL) {
+            printf("popen() failed\n");
+            continue;
+        }
+
+        while (fgets(buf, sizeof(buf), apipe)!=NULL) {
+            printf("%s", buf);
+        }
+
+        pclose(apipe);
+
+        posix_sleep_ms(10000);
     }
+
+    return 0;
 }
 
 void *camera_service_thread(void* arg) {
@@ -84,7 +111,7 @@ void signal_exit(void)
     pthread_mutex_lock(&system_loop_mutex);
     system_loop_exit = true;
     pthread_mutex_unlock(&system_loop_mutex);
-    pthread_cond_signal(&system_loop_cond);
+    pthread_cond_broadcast(&system_loop_cond);
 }
 
 int system_server()
@@ -141,7 +168,8 @@ int system_server()
         pthread_cond_wait(&system_loop_cond, &system_loop_mutex);
     }
     pthread_mutex_unlock(&system_loop_mutex);
-
+    
+    printf("<== system\n");
     while (1) {
         sleep(1);
     }
