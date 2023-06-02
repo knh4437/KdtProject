@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <mqueue.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include <system_server.h>
 #include <gui.h>
@@ -118,6 +121,7 @@ int toy_send(char **args);
 int toy_mutex(char **args);
 int toy_shell(char **args);
 int toy_message_queue(char **args);
+int toy_read_elf_header(char **args);
 int toy_exit(char **args);
 
 char *builtin_str[] = {
@@ -125,6 +129,7 @@ char *builtin_str[] = {
     "mu",
     "sh",
     "mq",
+    "elf",
     "exit"
 };
 
@@ -133,6 +138,7 @@ int (*builtin_func[]) (char **) = {
     &toy_mutex,
     &toy_shell,
     &toy_message_queue,
+    &toy_read_elf_header,
     &toy_exit
 };
 int toy_num_builtins()
@@ -177,6 +183,46 @@ int toy_message_queue(char **args)
         mqretcode = mq_send(camera_queue, (char *)&msg, sizeof(msg), 0);
         assert(mqretcode == 0);
     }
+
+    return 1;
+}
+
+int toy_read_elf_header(char **args)
+{
+    int mqretcode;
+    toy_msg_t msg;
+    int in_fd;
+    char *contents = NULL;
+    size_t contents_sz;
+    struct stat st;
+    Elf64Hdr *map;
+
+    in_fd = open("./sample/sample.elf", O_RDONLY);
+	if ( in_fd < 0 ) {
+        printf("cannot open ./sample/sample.elf\n");
+        return 1;
+    }
+    /* 여기서 mmap을 이용하여 파일 내용을 읽으세요.
+     * fread 사용 X
+     */
+    if (fstat(in_fd, &st) == -1)
+        perror("fstat");
+    if ((contents_sz = st.st_size) == 0)
+        exit(EXIT_SUCCESS);
+
+    map = mmap(NULL, contents_sz, PROT_READ, MAP_PRIVATE, in_fd, 0);
+    if (contents == MAP_FAILED)
+        perror("mmap");
+
+    printf("real size : %ld\n", contents_sz);
+    printf("Object file type : %d\n", map->e_type);
+    printf("Architecture : %d\n", map->e_machine);
+    printf("Object file version : %d\n",map->e_version);
+    printf("Entry point virtual address : %ld\n", map->e_entry);
+    printf("Program header table file offset : %ld\n", map->e_phoff);
+
+    munmap(map, contents_sz);
+    close(in_fd);
 
     return 1;
 }

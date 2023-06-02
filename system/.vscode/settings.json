@@ -5,7 +5,9 @@
         "input.h": "c",
         "stdio.h": "c",
         "prctl.h": "c",
-        "web_server.h": "c"
+        "web_server.h": "c",
+        "wait.h": "c",
+        "numbers": "c"
     },
     "C_Cpp.errorSquiggles": "Disabled"
 }

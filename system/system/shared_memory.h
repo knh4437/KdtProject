@@ -1,6 +1,5 @@
 #ifndef _SHARED_MEMORY_H
 #define _SHARED_MEMORY_H
-
 #include <sys/shm.h>
 #define OBJ_PERMS (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)
 #define BUF_SIZE 1024
@@ -19,5 +18,11 @@ typedef struct shm_sensor {
 } shm_sensor_t;
 
 extern int shm_id[SHM_KEY_MAX - SHM_KEY_BASE];
+
+void *toy_shm_create(int key, int size);
+void *toy_shm_attach(int shmid);
+int toy_shm_detach(void *ptr);
+int toy_shm_remove(int shmid);
+int toy_shm_get_keyid(int key);
 
 #endif /* _SHARED_MEMORY_H */

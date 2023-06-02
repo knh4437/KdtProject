@@ -15,6 +15,7 @@
 #include <camera_HAL.h>
 #include <toy_message.h>
 #include <shared_memory.h>
+
 #define PTHREAD_COUNT 5
 #define CAMERA_TAKE_PICTURE 1
 #define SENSOR_DATA 1
