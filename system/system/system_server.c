@@ -14,8 +14,10 @@
 #include <web_server.h>
 #include <camera_HAL.h>
 #include <toy_message.h>
+#include <shared_memory.h>
 #define PTHREAD_COUNT 5
 #define CAMERA_TAKE_PICTURE 1
+#define SENSOR_DATA 1
 
 pthread_mutex_t system_loop_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t  system_loop_cond  = PTHREAD_COND_INITIALIZER;
@@ -31,6 +33,9 @@ pthread_mutex_t toy_timer_mutex = PTHREAD_MUTEX_INITIALIZER;
 static sem_t global_timer_sem;
 static bool global_timer_stopped;
 
+static shm_sensor_t *the_sensor_info = NULL;
+void set_periodic_timer(long sec_delay, long usec_delay);
+
 static void timer_expire_signal_handler()
 {
     // signal 문맥에서는 비동기 시그널 안전 함수(async-signal-safe function) 사용
@@ -45,7 +50,6 @@ static void system_timeout_handler()
     // 여기는 signal hander가 아니기 때문에 안전하게 mutex lock 사용 가능
     pthread_mutex_lock(&toy_timer_mutex);
     toy_timer++;
-    printf("toy_timer: %d\n", toy_timer);
     pthread_mutex_unlock(&toy_timer_mutex);
 }
 
@@ -54,12 +58,18 @@ static void *timer_thread(void *not_used)
     signal(SIGALRM, timer_expire_signal_handler);
     set_periodic_timer(1, 1);
 
-    sem_init(&global_timer_sem, 0, 0);
-
 	while (!global_timer_stopped) {
+		int rc = sem_wait(&global_timer_sem);
+		if (rc == -1 && errno == EINTR) {
+		    continue;
+		}
+
+		if (rc == -1) {
+		    perror("sem_wait");
+		    exit(-1);
+		}
         // 아래 sleep을 sem_wait 함수를 사용하여 동기화 처리
         // sleep(1);
-        sem_wait(&global_timer_sem);
 		system_timeout_handler();
 	}
 	return 0;
@@ -106,13 +116,27 @@ void *monitor_thread(void* arg) {
     char *s = arg;
     int mqretcode;
     toy_msg_t msg;
+    int shmid;
 
     printf("%s", s);
 
-    /* 여기에 구현하세요. */
     while (1) {
-        if (mq_receive(monitor_queue, (char)&msg, sizeof(toy_msg_t), 0) == -1)
-            perror("monitor_queue : mq_receive");
+        mqretcode = (int)mq_receive(monitor_queue, (void *)&msg, sizeof(toy_msg_t), 0);
+        assert(mqretcode >= 0);
+        printf("monitor_thread: 메시지가 도착했습니다.\n");
+        printf("msg.type: %d\n", msg.msg_type);
+        printf("msg.param1: %d\n", msg.param1);
+        printf("msg.param2: %d\n", msg.param2);
+        if (msg.msg_type == SENSOR_DATA) {
+            shmid = msg.param1;
+            // 이곳에 구현해 주세요.
+            // 시스템 V 공유 메모리 사용하여 공유 메모리 데이터를 출력
+            // 공유 메모리 키는 메시지 큐에서 받은 값을 사용.
+            the_sensor_info = shmat(shmid, NULL, 0);
+            printf("temp : %d\n", the_sensor_info->temp);
+            printf("pressure : %d\n", the_sensor_info->press);
+            printf("humidity: %d\n", the_sensor_info->humidity);
+        }
     }
 
     return 0;
