@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <semaphore.h>
 #include <sys/prctl.h>
 #include <signal.h>
 #include <sys/time.h>
@@ -13,6 +14,7 @@
 #include <web_server.h>
 #include <camera_HAL.h>
 #include <toy_message.h>
+#define PTHREAD_COUNT 5
 #define CAMERA_TAKE_PICTURE 1
 
 pthread_mutex_t system_loop_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -25,12 +27,42 @@ static mqd_t disk_queue;
 static mqd_t camera_queue;
 
 static int toy_timer = 0;
+pthread_mutex_t toy_timer_mutex = PTHREAD_MUTEX_INITIALIZER;
+static sem_t global_timer_sem;
+static bool global_timer_stopped;
 
-void signal_exit(void);
+static void timer_expire_signal_handler()
+{
+    // signal 문맥에서는 비동기 시그널 안전 함수(async-signal-safe function) 사용
+    // man signal 확인
+    // sem_post는 async-signal-safe function
+    // 여기서는 sem_post 사용
+    sem_post(&global_timer_sem);
+}
 
-void sigalarm_handler(int sig) {
+static void system_timeout_handler()
+{
+    // 여기는 signal hander가 아니기 때문에 안전하게 mutex lock 사용 가능
+    pthread_mutex_lock(&toy_timer_mutex);
     toy_timer++;
-    signal_exit();
+    printf("toy_timer: %d\n", toy_timer);
+    pthread_mutex_unlock(&toy_timer_mutex);
+}
+
+static void *timer_thread(void *not_used)
+{
+    signal(SIGALRM, timer_expire_signal_handler);
+    set_periodic_timer(1, 1);
+
+    sem_init(&global_timer_sem, 0, 0);
+
+	while (!global_timer_stopped) {
+        // 아래 sleep을 sem_wait 함수를 사용하여 동기화 처리
+        // sleep(1);
+        sem_wait(&global_timer_sem);
+		system_timeout_handler();
+	}
+	return 0;
 }
 
 void set_periodic_timer(long sec_delay, long usec_delay)
@@ -97,24 +129,25 @@ void *disk_service_thread(void* arg) {
     printf("%s", s);
 
     while (1) {
+        if (mq_receive(disk_queue, (char)&msg, sizeof(toy_msg_t), 0) == -1)
+            perror("disk_queue : mq_receive");
+
         /* popen 사용하여 10초마다 disk 잔여량 출력
          * popen으로 shell을 실행하면 성능과 보안 문제가 있음
          * 향후 파일 관련 시스템 콜 시간에 개선,
          * 하지만 가끔 빠르게 테스트 프로그램 또는 프로토 타입 시스템 작성 시 유용
          */
-        // apipe = popen(cmd, "r");
-        // if (apipe == NULL) {
-        //     printf("popen() failed\n");
-        //     continue;
-        // }
-        // while (fgets(buf, sizeof(buf), apipe)!=NULL) {
-        //     printf("%s", buf);
-        // }
-        // pclose(apipe);
-        // posix_sleep_ms(10000);
+        apipe = popen(cmd, "r");
+        if (apipe == NULL) {
+            printf("popen() failed\n");
+            continue;
+        }
+        while (fgets(buf, sizeof(buf), apipe)!=NULL) {
+            printf("%s", buf);
+        }
+        pclose(apipe);
+        posix_sleep_ms(10000);
 
-        if (mq_receive(disk_queue, (char)&msg, sizeof(toy_msg_t), 0) == -1)
-            perror("disk_queue : mq_receive");
     }
 
     return 0;
@@ -161,16 +194,12 @@ int system_server()
     struct sigaction  sa;
     struct sigevent   sev;
     timer_t *tidlist;
-    int retcode[4];
+    int retcode[PTHREAD_COUNT];
     pthread_t watchdog_thread_tid, monitor_thread_tid, disk_service_thread_tid, camera_service_thread_tid;
+    pthread_t timer_thread_tid;
 
     printf("나 system_server 프로세스!\n");
 
-    signal(SIGALRM, sigalarm_handler);
-    /* 10초 타이머 등록 */
-    set_periodic_timer(10, 0);
-
-    /* 여기에 구현하세요. */
     /* 메시지 큐를 오픈한다. */
     watchdog_queue = mq_open("/watchdog_queue", O_RDWR);
     if (watchdog_queue == (mqd_t) -1)
@@ -190,6 +219,8 @@ int system_server()
     retcode[1] = pthread_create(&monitor_thread_tid, NULL, monitor_thread, "monitor thread");
     retcode[2] = pthread_create(&disk_service_thread_tid, NULL, disk_service_thread, "disk_service thread");
     retcode[3] = pthread_create(&camera_service_thread_tid, NULL, camera_service_thread, "camera_service thread");
+    retcode[4] = pthread_create(&timer_thread_tid, NULL, timer_thread, "timer thread");
+
 
     int length = sizeof(retcode) / sizeof(retcode[0]);
 
@@ -201,10 +232,6 @@ int system_server()
     printf("system init done.  waiting...");
 
     // 여기에 구현하세요... 여기서 cond wait로 대기한다. 10초 후 알람이 울리면 <== system 출력
-    // /* 1초 마다 wake-up 한다 */
-    // while (system_loop_exit == false) {
-    //     sleep(1);
-    // }
     pthread_mutex_lock(&system_loop_mutex);
     while (system_loop_exit == false) {
         pthread_cond_wait(&system_loop_cond, &system_loop_mutex);
