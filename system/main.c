@@ -59,16 +59,16 @@ int main()
     attr.mq_maxmsg = NUM_MESSAGES;
     attr.mq_msgsize = sizeof(toy_msg_t);
 
-    watchdog_queue = mq_open(&watchdog_queue,"/watchdog_queue", O_RDWR|O_CREAT, 0666, &attr);
+    watchdog_queue = mq_open("/watchdog_queue", O_RDWR|O_CREAT, 0666, &attr);
     if (watchdog_queue == (mqd_t) -1)
         perror("main - watchdog_queue : mq_open");
-    monitor_queue = mq_open(&monitor_queue,"/monitor_queue", O_RDWR|O_CREAT, 0666, &attr);
+    monitor_queue = mq_open("/monitor_queue", O_RDWR|O_CREAT, 0666, &attr);
     if (monitor_queue == (mqd_t) -1)
         perror("main - monitor_queue : mq_open");
-    disk_queue = mq_open(&disk_queue,"/disk_queue", O_RDWR|O_CREAT, 0666, &attr);
+    disk_queue = mq_open("/disk_queue", O_RDWR|O_CREAT, 0666, &attr);
     if (disk_queue == (mqd_t) -1)
         perror("main - disk_queue : mq_open");
-    camera_queue = mq_open(&camera_queue,"/camera_queue", O_RDWR|O_CREAT, 0666, &attr);
+    camera_queue = mq_open("/camera_queue", O_RDWR|O_CREAT, 0666, &attr);
     if (camera_queue == (mqd_t) -1)
         perror("main - camera_queue : mq_open");
 

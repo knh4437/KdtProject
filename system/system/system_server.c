@@ -7,6 +7,16 @@
 #include <sys/time.h>
 #include <time.h>
 #include <mqueue.h>
+#include <sys/inotify.h>
+#include <limits.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <sys/sysmacros.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <stdint.h>
+#include <string.h>
+#include <dirent.h>
 
 #include <system_server.h>
 #include <gui.h>
@@ -15,10 +25,13 @@
 #include <camera_HAL.h>
 #include <toy_message.h>
 #include <shared_memory.h>
+// #include <dump_state.h>
 
 #define PTHREAD_COUNT 5
 #define CAMERA_TAKE_PICTURE 1
-#define SENSOR_DATA 1
+
+#define BUF_LEN 1024
+#define TOY_TEST_FS "./fs"
 
 pthread_mutex_t system_loop_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t  system_loop_cond  = PTHREAD_COND_INITIALIZER;
@@ -105,12 +118,59 @@ void *watchdog_thread(void* arg) {
   
     /* 여기에 구현하세요. */
     while (1) {
-        if (mq_receive(watchdog_queue, (char)&msg, sizeof(toy_msg_t), 0)== -1)
+        if (mq_receive(watchdog_queue, (void *)&msg, sizeof(toy_msg_t), 0)== -1)
             perror("watchdog_queue : mq_receive");
     }
 
 
     return 0;
+}
+
+#define SENSOR_DATA 1
+#define DUMP_STATE 2
+#define DUMP_FILE_SIZE 14
+
+char *files[DUMP_FILE_SIZE] = {
+    "/proc/version",
+    "/proc/meminfo",
+    "/proc/vmstat",
+    "/proc/vmallocinfo",
+    "/proc/slabinfo",
+    "/proc/zoneinfo",
+    "/proc/pagetypeinfo",
+    "/proc/buddyinfo",
+    "dmesg",
+    "show_wchan",
+    "/proc/net/dev",
+    "/proc/net/route",
+    "/proc/net/ipv6_route",
+    "/proc/interrupts"
+};
+
+void dumpstate() {
+    int fd, s;
+    int size = 1024;
+    char buf[size];
+    
+    for (int i=0;i<DUMP_FILE_SIZE;i++) {
+        fd = open(files[i], O_RDONLY);
+        if (fd == -1)
+            perror("dump : open");
+
+        while (1) {
+            s = read(fd, buf, size);
+            if (s < 0) {
+                perror("read error");
+                exit(-1);
+            }
+            else if (s == 0)
+                break;
+            write(STDOUT_FILENO, buf, s);
+        }
+        if (close(fd)==-1)
+            perror("dump : close");
+        printf("\n");
+    }
 }
 
 void *monitor_thread(void* arg) {
@@ -133,51 +193,70 @@ void *monitor_thread(void* arg) {
             // 이곳에 구현해 주세요.
             // 시스템 V 공유 메모리 사용하여 공유 메모리 데이터를 출력
             // 공유 메모리 키는 메시지 큐에서 받은 값을 사용.
-            the_sensor_info = shmat(shmid, NULL, 0);
+            the_sensor_info = toy_shm_attach(shmid);
             printf("temp : %d\n", the_sensor_info->temp);
             printf("pressure : %d\n", the_sensor_info->press);
             printf("humidity: %d\n", the_sensor_info->humidity);
+            toy_shm_detach(the_sensor_info);
+        } else if (msg.msg_type == DUMP_STATE) {
+            // 여기에 dumpstate를 구현해 주세요.
+            dumpstate();
+            
+        } else {
+            printf("monitor_thread: unknown message. xxx\n");
         }
     }
 
     return 0;
 }
 
-void *disk_service_thread(void* arg) {
+// https://stackoverflow.com/questions/21618260/how-to-get-total-size-of-subdirectories-in-c
+void *disk_service_thread(void* arg)
+{
     char *s = arg;
-    FILE* apipe;
-    char buf[1024];
-    char cmd[]="df -h ./" ;
-    int mqretcode;
-    toy_msg_t msg;
+    int inotifyFd, wd, j;
+    char buf[BUF_LEN] __attribute__ ((aligned(8)));
+    ssize_t numRead;
+    char *p;
+    struct inotify_event *event;
+    char *directory = TOY_TEST_FS;
+    int total_size;
 
     printf("%s", s);
 
+    // 여기에 구현
+    inotifyFd = inotify_init();
+    if (inotifyFd == -1)
+        perror("inotify_init");
+
+    wd = inotify_add_watch(inotifyFd, directory, IN_CREATE);
+    if (wd == -1)
+        perror("inotify_add_watch");
     while (1) {
-        if (mq_receive(disk_queue, (char)&msg, sizeof(toy_msg_t), 0) == -1)
-            perror("disk_queue : mq_receive");
-
-        /* popen 사용하여 10초마다 disk 잔여량 출력
-         * popen으로 shell을 실행하면 성능과 보안 문제가 있음
-         * 향후 파일 관련 시스템 콜 시간에 개선,
-         * 하지만 가끔 빠르게 테스트 프로그램 또는 프로토 타입 시스템 작성 시 유용
-         */
-        apipe = popen(cmd, "r");
-        if (apipe == NULL) {
-            printf("popen() failed\n");
-            continue;
+        numRead = read(inotifyFd, buf, BUF_LEN);
+        if (numRead <= 0)
+            perror("read");
+        
+        p = buf;
+        while (p < buf + numRead) {
+            event = (struct inotify_event *)p;
+            if (event->mask & IN_CREATE) {
+                if (event->len >0){
+                    if (strcmp(event->name, "fs") == 0) {
+                        printf("Directory size : ");
+                        system("du -sh .");
+                    }
+                }
+            }
+            p += sizeof(struct inotify_event) + event->len;
         }
-        while (fgets(buf, sizeof(buf), apipe)!=NULL) {
-            printf("%s", buf);
-        }
-        pclose(apipe);
-        posix_sleep_ms(10000);
-
+        sleep(1);
     }
+    inotify_rm_watch(inotifyFd, wd);
+    close(inotifyFd);
 
     return 0;
 }
-
 void *camera_service_thread(void* arg) {
     char *s = arg;
     int mqretcode;
@@ -197,6 +276,10 @@ void *camera_service_thread(void* arg) {
         printf("msg.param2: %d\n", msg.param2);
         if (msg.msg_type==CAMERA_TAKE_PICTURE) {
             toy_camera_take_picture();
+        } else if (msg.msg_type == DUMP_STATE) {
+            toy_camera_dump();
+        } else {
+            printf("camera_service_thread: unknown message. xxx\n");
         }
     }
 
