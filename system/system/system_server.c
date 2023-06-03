@@ -22,10 +22,11 @@
 #include <gui.h>
 #include <input.h>
 #include <web_server.h>
-#include <camera_HAL.h>
+// #include <camera_HAL.h>
 #include <toy_message.h>
 #include <shared_memory.h>
-// #include <dump_state.h>
+#include <dump_state.h>
+#include <hardware.h>
 
 #define PTHREAD_COUNT 5
 #define CAMERA_TAKE_PICTURE 1
@@ -49,6 +50,7 @@ static bool global_timer_stopped;
 
 static shm_sensor_t *the_sensor_info = NULL;
 void set_periodic_timer(long sec_delay, long usec_delay);
+void getdumpstate();
 
 static void timer_expire_signal_handler()
 {
@@ -147,7 +149,7 @@ char *files[DUMP_FILE_SIZE] = {
     "/proc/interrupts"
 };
 
-void dumpstate() {
+void getdumpstate() {
     int fd, s;
     int size = 1024;
     char buf[size];
@@ -200,7 +202,7 @@ void *monitor_thread(void* arg) {
             toy_shm_detach(the_sensor_info);
         } else if (msg.msg_type == DUMP_STATE) {
             // 여기에 dumpstate를 구현해 주세요.
-            dumpstate();
+            getdumpstate();
             
         } else {
             printf("monitor_thread: unknown message. xxx\n");
@@ -261,10 +263,17 @@ void *camera_service_thread(void* arg) {
     char *s = arg;
     int mqretcode;
     toy_msg_t msg;
+    hw_module_t *module = NULL;
+    int res;
 
     printf("%s", s);
-
-    toy_camera_open();
+    // 여기서 동적으로 심볼을 로딩 합니다.
+    res = hw_get_camera_module((const hw_module_t **)&module);
+    assert(res == 0);
+    printf("Camera module name: %s\n", module->name);
+    printf("Camera module tag: %d\n", module->tag);
+    printf("Camera module id: %s\n", module->id);
+    module->open();
 
     /* 여기에 구현하세요. */
     while (1) {
@@ -275,9 +284,9 @@ void *camera_service_thread(void* arg) {
         printf("msg.param1: %d\n", msg.param1);
         printf("msg.param2: %d\n", msg.param2);
         if (msg.msg_type==CAMERA_TAKE_PICTURE) {
-            toy_camera_take_picture();
+            module->take_picture();
         } else if (msg.msg_type == DUMP_STATE) {
-            toy_camera_dump();
+            module->dump();
         } else {
             printf("camera_service_thread: unknown message. xxx\n");
         }
