@@ -6,4 +6,4 @@ echo "ftrace off"
 sleep 3
 
 cp /sys/kernel/debug/tracing/trace . 
-mv trace ftrace_log.c
+mv trace ftrace_442.c
