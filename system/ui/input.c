@@ -14,6 +14,8 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/mman.h>
+#include <seccomp.h>
 
 #include <system_server.h>
 #include <gui.h>
@@ -22,7 +24,7 @@
 #include <execinfo.h>
 #include <toy_message.h>
 #include <shared_memory.h>
-// #include <dump_state.h>
+#include <dump_state.h>
 
 #define TOY_TOK_BUFSIZE 64
 #define TOY_TOK_DELIM " \t\r\n\a"
@@ -125,6 +127,7 @@ int toy_shell(char **args);
 int toy_message_queue(char **args);
 int toy_read_elf_header(char **args);
 int toy_dump_state(char **args);
+int toy_mincore(char **args);
 int toy_exit(char **args);
 
 char *builtin_str[] = {
@@ -134,6 +137,7 @@ char *builtin_str[] = {
     "mq",
     "elf",
     "dump",
+    "mincore",
     "exit"
 };
 
@@ -144,6 +148,7 @@ int (*builtin_func[]) (char **) = {
     &toy_message_queue,
     &toy_read_elf_header,
     &toy_dump_state,
+    &toy_mincore,
     &toy_exit
 };
 
@@ -245,6 +250,19 @@ int toy_dump_state(char **args)
     assert(mqretcode == 0);
     mqretcode = mq_send(monitor_queue, (char *)&msg, sizeof(msg), 0);
     assert(mqretcode == 0);
+
+    return 1;
+}
+
+int toy_mincore(char **args)
+{
+    unsigned char vec[20];
+    int res;
+    size_t page = sysconf(_SC_PAGESIZE);
+    void *addr = mmap(NULL, 20 * page, PROT_READ | PROT_WRITE,
+                    MAP_NORESERVE | MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+    res = mincore(addr, 10 * page, vec);
+    assert(res == 0);
 
     return 1;
 }
@@ -379,6 +397,8 @@ int input()
     int retcode[2];
     struct sigaction sa;
     pthread_t command_thread_tid, sensor_thread_tid;
+    int i;
+    scmp_filter_ctx ctx;
 
     printf("나 input 프로세스!\n");
 
@@ -390,10 +410,27 @@ int input()
 
     sigaction(SIGSEGV, &sa, NULL); /* ignore whether it works or not */
 
-    /* 센서 정보를 공유하기 위한, 시스템 V 공유 메모리를 생성한다 */
-    // 여기에 구현해주세요....
+    // 여기에 seccomp 을 이용해서 mincore 시스템 콜을 막아 주세요.
+    ctx = seccomp_init(SCMP_ACT_ALLOW);
+    if (ctx == NULL) {
+        perror("seccomp_init() failed");
+        exit(-1);
+    }
 
-     /* Create shared memory; attach at address chosen by system */
+    i = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS(mincore),0);
+    if (i < 0)
+        perror("seccomp_rule_add() failed");
+    
+    seccomp_export_pfc(ctx, 5);
+    seccomp_export_bpf(ctx, 6);
+
+    i = seccomp_load(ctx);
+    if (i < 0)
+        perror("seccomp_load() failed");
+    
+    seccomp_release(ctx);
+
+    /* 센서 정보를 공유하기 위한, 시스템 V 공유 메모리를 생성한다 */
     int semid = shmget(SHM_KEY_SENSOR, sizeof(struct shm_sensor), IPC_CREAT | OBJ_PERMS);
     if (semid == -1)
         perror("semid : shmget() error");
@@ -403,9 +440,6 @@ int input()
     /* 메시지 큐를 오픈 한다.
      * 하지만, 사실 fork로 생성했기 때문에 파일 디스크립터 공유되었음. 따따서, extern으로 사용 가능
     */
-
-
-    /* 메시지 큐를 오픈 한다. */
     watchdog_queue = mq_open("/watchdog_queue", O_RDWR);
     assert(watchdog_queue != -1);
     monitor_queue = mq_open("/monitor_queue", O_RDWR);
