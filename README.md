@@ -6,6 +6,7 @@
   </a>
 </h6>
 <div style="display:inline;">
+  <img src="https://img.shields.io/badge/C Language-A8B9CC?style=flat-square&logo=C&logoColor=black"/>
   <img src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=Linux&logoColor=black">
   <img src="https://img.shields.io/badge/VMware-607078?style=flat-square&logo=VMware&logoColor=white"/>
   <img src="https://img.shields.io/badge/Vim-019733?style=flat-square&logo=Vim&logoColor=white"/>
